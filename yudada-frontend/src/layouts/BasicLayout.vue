@@ -24,8 +24,11 @@ import GlobalHeader from "@/components/GlobalHeader.vue";
   box-shadow: #eee 1px 1px 5px;
 }
 .content {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto 28px;
+  box-sizing: border-box;
   background: linear-gradient(to right, #fefefe, #fff);
-  margin-bottom: 28px;
   padding: 20px;
 }
 .footer {

@@ -1,29 +1,47 @@
 package com.yupi.yudada.model.enums;
 
-import org.apache.commons.lang3.ObjectUtils;
+import cn.hutool.core.util.ObjectUtil;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * app类型枚举
+ * App 评分策略枚举
  *
  * @author <a href="https://github.com/liyupi">程序员鱼皮</a>
- * @from <a href="https://yupi.icu">编程导航知识星球</a>
+ * @from <a href="https://www.code-nav.cn">编程导航学习圈</a>
  */
-public enum AppTypeEnum {
+public enum AppScoringStrategyEnum {
 
-    SCORE("得分类", 0),
-    TEST("测评类", 1);
+    CUSTOM("自定义", 0),
+    AI("AI", 1);
 
     private final String text;
 
     private final int value;
 
-    AppTypeEnum(String text, int value) {
+    AppScoringStrategyEnum(String text, int value) {
         this.text = text;
         this.value = value;
+    }
+
+    /**
+     * 根据 value 获取枚举
+     *
+     * @param value
+     * @return
+     */
+    public static AppScoringStrategyEnum getEnumByValue(Integer value) {
+        if (ObjectUtil.isEmpty(value)) {
+            return null;
+        }
+        for (AppScoringStrategyEnum anEnum : AppScoringStrategyEnum.values()) {
+            if (anEnum.value == value) {
+                return anEnum;
+            }
+        }
+        return null;
     }
 
     /**
@@ -33,24 +51,6 @@ public enum AppTypeEnum {
      */
     public static List<Integer> getValues() {
         return Arrays.stream(values()).map(item -> item.value).collect(Collectors.toList());
-    }
-
-    /**
-     * 根据 value 获取枚举
-     *
-     * @param value
-     * @return
-     */
-    public static AppTypeEnum getEnumByValue(int value) {
-        if (ObjectUtils.isEmpty(value)) {
-            return null;
-        }
-        for (AppTypeEnum anEnum : AppTypeEnum.values()) {
-            if (anEnum.value == value) {
-                return anEnum;
-            }
-        }
-        return null;
     }
 
     public int getValue() {

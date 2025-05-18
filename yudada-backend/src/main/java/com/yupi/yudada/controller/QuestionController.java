@@ -278,7 +278,7 @@ public class QuestionController {
             "```\n" +
             "title 是题目，options 是选项，每个选项的 key 按照英文字母序（比如 A、B、C、D）以此类推，value 是选项内容\n" +
             "3. 检查题目是否包含序号，若包含序号则去除序号\n" +
-            "4. 返回的题目列表格式必须为 JSON 数组\n";
+            "4. 返回的题目列表格式必须为 JSON 数组";
 
     /**
      * 生成题目的用户消息

@@ -210,8 +210,10 @@ const getQuestionTypeColor = (options?: QuestionOption[]) => {
 
 /**
  * 处理文件上传
+ * @param fileObj Arco UploadChange 事件对象
  */
-const handleFileChange = async (file: File) => {
+const handleFileChange = (fileObj: { file: { originFile?: File }; fileList: unknown[]; event: unknown }) => {
+  const file = fileObj.file?.originFile;
   if (!file || !sessionId.value) {
     Message.warning("会话未建立，请刷新页面重试");
     return;
@@ -219,42 +221,48 @@ const handleFileChange = async (file: File) => {
 
   uploading.value = true;
 
-  try {
-    const res = await generateExamUsingPost(file, sessionId.value);
+  /**
+   * 上传文件
+   */
+  const doUpload = async () => {
+    try {
+      const res = await generateExamUsingPost(file, sessionId.value);
 
-    if (res.data.code === 0 && res.data.data) {
-      hasUploaded.value = true;
-      questions.value = res.data.data;
+      if (res.data.code === 0 && res.data.data) {
+        hasUploaded.value = true;
+        questions.value = res.data.data;
 
-      // 添加 AI 欢迎消息
-      messages.value.push({
-        role: "ai",
-        content: `已成功上传并分析文件，生成 <strong>${questions.value.length} 道题目</strong>。左侧预览区可以查看生成的题目。您可以：<br/>- 点击题目卡片上的"AI 修改"按钮调整题目<br/>- 在下方输入框中描述修改需求`,
-      });
+        // 添加 AI 欢迎消息
+        messages.value.push({
+          role: "ai",
+          content: `已成功上传并分析文件，生成 <strong>${questions.value.length} 道题目</strong>。左侧预览区可以查看生成的题目。您可以：<br/>- 点击题目卡片上的"AI 修改"按钮调整题目<br/>- 在下方输入框中描述修改需求`,
+        });
 
-      Message.success("题目生成成功！");
-      await nextTick();
-      scrollToBottom();
-    } else {
-      const errorCode = res.data.code;
-      if (errorCode === 40400) {
+        Message.success("题目生成成功！");
+        nextTick(() => scrollToBottom());
+      } else {
+        const errorCode = res.data.code;
+        if (errorCode === 40400) {
+          Message.error("会话已过期，请刷新页面重新上传");
+          sessionId.value = "";
+        } else {
+          Message.error("生成失败：" + (res.data.message || "未知错误"));
+        }
+      }
+    } catch (error: any) {
+      console.error("上传失败:", error);
+      if (error.response?.data?.code === 40400) {
         Message.error("会话已过期，请刷新页面重新上传");
         sessionId.value = "";
       } else {
-        Message.error("生成失败：" + (res.data.message || "未知错误"));
+        Message.error("上传失败，请检查网络连接");
       }
+    } finally {
+      uploading.value = false;
     }
-  } catch (error: any) {
-    console.error("上传失败:", error);
-    if (error.response?.data?.code === 40400) {
-      Message.error("会话已过期，请刷新页面重新上传");
-      sessionId.value = "";
-    } else {
-      Message.error("上传失败，请检查网络连接");
-    }
-  } finally {
-    uploading.value = false;
-  }
+  };
+
+  doUpload();
 };
 
 /**

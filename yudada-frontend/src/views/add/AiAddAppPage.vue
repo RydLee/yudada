@@ -2,10 +2,16 @@
   <div class="ai-add-app-page">
     <div class="page-header">
       <h2>AI 创建应用</h2>
-      <a-button v-if="questions.length > 0" type="primary" @click="handleSaveApp">
-        <template #icon><icon-check /></template>
-        保存应用
-      </a-button>
+      <a-space>
+        <a-button v-if="questions.length > 0" type="primary" @click="handleSaveApp">
+          <template #icon><icon-check /></template>
+          保存应用
+        </a-button>
+        <a-button v-if="sessionId" @click="handleEndSession">
+          <template #icon><icon-close /></template>
+          结束会话
+        </a-button>
+      </a-space>
     </div>
     <div class="split-container">
       <!-- 左侧：题目预览区 -->
@@ -168,11 +174,13 @@ import {
   IconSend,
   IconBot,
   IconCheck,
+  IconClose,
 } from "@arco-design/web-vue/es/icon";
 import { Message } from "@arco-design/web-vue";
 import API from "@/api";
 import {
   createSessionUsingPost,
+  deleteSessionUsingPost,
   generateExamUsingPost,
   modifyQuestionUsingPost,
   saveExamUsingPost,
@@ -576,6 +584,43 @@ const handleSaveApp = async () => {
     console.error("保存失败:", error);
     Message.error("保存失败，请检查网络连接");
   }
+};
+
+/**
+ * 结束会话
+ */
+const handleEndSession = async () => {
+  if (!sessionId.value) {
+    Message.warning("会话已结束或不存在");
+    resetPage();
+    return;
+  }
+
+  try {
+    const res = await deleteSessionUsingPost(sessionId.value);
+    if (res.data.code === 0) {
+      Message.success("会话已结束");
+    } else {
+      Message.warning("会话已结束");
+    }
+  } catch (error) {
+    // 即使请求失败，也视为会话已结束
+    console.log("结束会话请求失败，但可能已结束");
+  } finally {
+    resetPage();
+  }
+};
+
+/**
+ * 重置页面状态
+ */
+const resetPage = () => {
+  sessionId.value = "";
+  questions.value = [];
+  messages.value = [];
+  hasUploaded.value = false;
+  uploadForm.value = { appName: "", appDesc: "" };
+  sessionStorage.removeItem(STORAGE_KEY);
 };
 </script>
 

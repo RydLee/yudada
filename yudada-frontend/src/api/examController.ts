@@ -107,3 +107,32 @@ export const modifyQuestionUsingPost = (
     },
   });
 };
+
+/**
+ * 保存应用（从 Session 创建应用和题目）
+ * @param sessionId 会话 ID
+ * @param appName 应用名称
+ * @param appDesc 应用描述（可选）
+ * @param appType 应用类型（0-得分类，1-测评类，默认0）
+ * @param scoringStrategy 评分策略（0-自定义，1-AI，默认0）
+ * @returns 创建的应用 ID
+ */
+export const saveExamUsingPost = (
+  sessionId: string,
+  appName: string,
+  appDesc?: string,
+  appType: number = 0,
+  scoringStrategy: number = 0
+): AxiosPromise<number> => {
+  return myAxios({
+    url: "/api/exam/save",
+    method: "post",
+    params: {
+      sessionId,
+      appName,
+      appDesc,
+      appType,
+      scoringStrategy,
+    },
+  });
+};

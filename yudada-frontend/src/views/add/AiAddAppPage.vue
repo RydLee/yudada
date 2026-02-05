@@ -2,6 +2,10 @@
   <div class="ai-add-app-page">
     <div class="page-header">
       <h2>AI 创建应用</h2>
+      <a-button v-if="questions.length > 0" type="primary" @click="handleSaveApp">
+        <template #icon><icon-check /></template>
+        保存应用
+      </a-button>
     </div>
     <div class="split-container">
       <!-- 左侧：题目预览区 -->
@@ -163,6 +167,7 @@ import {
   IconUser,
   IconSend,
   IconBot,
+  IconCheck,
 } from "@arco-design/web-vue/es/icon";
 import { Message } from "@arco-design/web-vue";
 import API from "@/api";
@@ -170,6 +175,7 @@ import {
   createSessionUsingPost,
   generateExamUsingPost,
   modifyQuestionUsingPost,
+  saveExamUsingPost,
 } from "@/api/examController";
 
 // 题目选项类型（复用 API 定义的 Option）
@@ -521,6 +527,56 @@ const scrollToBottom = () => {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight;
   }
 };
+
+/**
+ * 保存应用
+ */
+const handleSaveApp = async () => {
+  if (!sessionId.value) {
+    Message.warning("会话已过期，请重新上传文件");
+    return;
+  }
+
+  if (questions.value.length === 0) {
+    Message.warning("没有可保存的题目");
+    return;
+  }
+
+  // 如果用户已经填写了应用名称和描述，使用表单中的值
+  let appName = uploadForm.value.appName;
+  let appDesc = uploadForm.value.appDesc;
+
+  // 如果没有填写，提示用户
+  if (!appName) {
+    appName = prompt("请输入应用名称：");
+    if (!appName) {
+      return;
+    }
+  }
+
+  try {
+    const res = await saveExamUsingPost(
+      sessionId.value,
+      appName,
+      appDesc || undefined
+    );
+
+    if (res.data.code === 0 && res.data.data) {
+      Message.success("应用保存成功！");
+      // 清除缓存
+      sessionStorage.removeItem(STORAGE_KEY);
+      // 跳转到应用详情页
+      setTimeout(() => {
+        window.location.href = `/app/detail/${res.data.data}`;
+      }, 1500);
+    } else {
+      Message.error("保存失败：" + (res.data.message || "未知错误"));
+    }
+  } catch (error: any) {
+    console.error("保存失败:", error);
+    Message.error("保存失败，请检查网络连接");
+  }
+};
 </script>
 
 <style scoped>
@@ -533,7 +589,17 @@ const scrollToBottom = () => {
 }
 
 .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 24px;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text-1);
 }
 
 .page-header h2 {

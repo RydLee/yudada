@@ -9,8 +9,18 @@ import com.yupi.yudada.common.BaseResponse;
 import com.yupi.yudada.common.ErrorCode;
 import com.yupi.yudada.common.ResultUtils;
 import com.yupi.yudada.exception.BusinessException;
+import com.yupi.yudada.exception.ThrowUtils;
+import com.yupi.yudada.model.dto.app.AppAddRequest;
+import com.yupi.yudada.model.dto.question.QuestionAddRequest;
 import com.yupi.yudada.model.dto.question.QuestionContentDTO;
+import com.yupi.yudada.model.entity.App;
+import com.yupi.yudada.model.entity.Question;
+import com.yupi.yudada.model.entity.User;
+import com.yupi.yudada.model.enums.ReviewStatusEnum;
 import com.yupi.yudada.service.AiExamGenerator;
+import com.yupi.yudada.service.AppService;
+import com.yupi.yudada.service.QuestionService;
+import com.yupi.yudada.service.UserService;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.loader.FileSystemDocumentLoader;
 import dev.langchain4j.data.document.parser.apache.tika.ApacheTikaDocumentParser;
@@ -26,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import java.io.File;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
@@ -59,6 +70,15 @@ public class ExamController {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private UserService userService;
+
+    @Resource
+    private AppService appService;
+
+    @Resource
+    private QuestionService questionService;
+
     private final Gson gson = new Gson();
 
     /**
@@ -78,12 +98,16 @@ public class ExamController {
      *
      * @param file      PDF 文件
      * @param sessionId 会话 ID（必须传递）
+     * @param appName   应用名称
+     * @param appDesc   应用描述
      * @return 题目列表
      */
     @PostMapping("/generate")
     public BaseResponse<List<QuestionContentDTO>> generateExam(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("sessionId") String sessionId) {
+            @RequestParam("sessionId") String sessionId,
+            @RequestParam(value = "appName", required = false) String appName,
+            @RequestParam(value = "appDesc", required = false) String appDesc) {
         // 1. 校验 sessionId
         if (sessionId == null || sessionId.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "sessionId 不能为空");
@@ -101,8 +125,8 @@ public class ExamController {
             }
         }
 
-        // 3. 生成新试卷
-        List<QuestionContentDTO> questions = doGenerateExam(file);
+        // 3. 生成新试卷（传入 appName 和 appDesc）
+        List<QuestionContentDTO> questions = doGenerateExam(file, appName, appDesc);
 
         // 4. 缓存到 Redis
         String questionsJson = gson.toJson(questions);
@@ -155,6 +179,82 @@ public class ExamController {
         Boolean deleted = stringRedisTemplate.delete(sessionKey);
         log.info("删除考试 Session: {}, 结果: {}", sessionId, deleted);
         return ResultUtils.success(deleted != null && deleted);
+    }
+
+    /**
+     * 保存应用（从 Session 创建应用和题目）
+     *
+     * @param sessionId         会话 ID
+     * @param appName          应用名称
+     * @param appDesc          应用描述
+     * @param appType          应用类型（0-得分类，1-测评类）
+     * @param scoringStrategy  评分策略（0-自定义，1-AI）
+     * @param request          HTTP 请求
+     * @return 创建的应用 ID
+     */
+    @PostMapping("/save")
+    public BaseResponse<Long> saveExam(
+            @RequestParam("sessionId") String sessionId,
+            @RequestParam(value = "appName", required = false) String appName,
+            @RequestParam(value = "appDesc", required = false) String appDesc,
+            @RequestParam(value = "appType", defaultValue = "0") Integer appType,
+            @RequestParam(value = "scoringStrategy", defaultValue = "0") Integer scoringStrategy,
+            HttpServletRequest request) {
+        // 1. 参数校验
+        if (sessionId == null || sessionId.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "sessionId 不能为空");
+        }
+        if (appName == null || appName.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用名称不能为空");
+        }
+
+        String sessionKey = EXAM_SESSION_KEY_PREFIX + sessionId;
+
+        // 2. 从 Redis 获取题目列表
+        String cachedResult = stringRedisTemplate.opsForValue().get(sessionKey);
+        if (cachedResult == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "考试结果不存在或已过期");
+        }
+
+        List<QuestionContentDTO> questions = parseCachedResult(cachedResult);
+        if (questions == null || questions.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "考试结果为空");
+        }
+
+        // 3. 获取当前登录用户
+        User loginUser = userService.getLoginUser(request);
+
+        // 4. 创建应用
+        App app = new App();
+        app.setAppName(appName);
+        app.setAppDesc(appDesc);
+        app.setAppType(appType);
+        app.setScoringStrategy(scoringStrategy);
+        app.setUserId(loginUser.getId());
+        app.setReviewStatus(ReviewStatusEnum.REVIEWING.getValue());
+
+        boolean appResult = appService.save(app);
+        ThrowUtils.throwIf(!appResult, ErrorCode.OPERATION_ERROR, "创建应用失败");
+
+        Long appId = app.getId();
+        log.info("创建应用成功, appId: {}", appId);
+
+        // 5. 创建题目
+        Question question = new Question();
+        question.setAppId(appId);
+        question.setQuestionContent(gson.toJson(questions));
+        question.setUserId(loginUser.getId());
+
+        boolean questionResult = questionService.save(question);
+        ThrowUtils.throwIf(!questionResult, ErrorCode.OPERATION_ERROR, "创建题目失败");
+
+        log.info("创建题目成功, questionId: {}", question.getId());
+
+        // 6. 清除 Redis 缓存
+        stringRedisTemplate.delete(sessionKey);
+        log.info("已清除 Redis 缓存, sessionId: {}", sessionId);
+
+        return ResultUtils.success(appId);
     }
 
     /**
@@ -315,10 +415,12 @@ public class ExamController {
     /**
      * 核心生成试卷逻辑（内部方法）
      *
-     * @param file PDF 文件
+     * @param file    PDF 文件
+     * @param appName 应用名称（可为空）
+     * @param appDesc 应用描述（可为空）
      * @return 题目列表
      */
-    private List<QuestionContentDTO> doGenerateExam(MultipartFile file) {
+    private List<QuestionContentDTO> doGenerateExam(MultipartFile file, String appName, String appDesc) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件不能为空");
         }
@@ -344,14 +446,18 @@ public class ExamController {
                 fullText = fullText.substring(0, 20000);
             }
 
-            // 4. 调用 AI 生成
-            String jsonResult = aiExamGenerator.generateQuestions(fullText);
+            // 4. 构建 Prompt（整合 PDF 内容、应用名称和应用描述）
+            String prompt = buildGeneratePrompt(fullText, appName, appDesc);
+            log.info("生成试卷 Prompt: {}", prompt);
+
+            // 5. 调用 AI 生成
+            String jsonResult = aiExamGenerator.generateQuestions(prompt);
             log.info("AI 原始返回: {}", jsonResult);
 
-            // 5. 解析并转换为 QuestionContentDTO
+            // 6. 解析并转换为 QuestionContentDTO
             List<QuestionContentDTO> questions = parseAiResponse(jsonResult);
 
-            // 6. 校验解析结果
+            // 7. 校验解析结果
             if (questions == null || questions.isEmpty()) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "AI 生成题目为空，请重试");
             }
@@ -364,7 +470,7 @@ public class ExamController {
             log.error("生成试卷失败", e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成试卷失败: " + e.getMessage());
         } finally {
-            // 7. 清理临时文件
+            // 8. 清理临时文件
             if (tempFile != null && tempFile.exists()) {
                 boolean deleted = tempFile.delete();
                 if (!deleted) {
@@ -372,6 +478,58 @@ public class ExamController {
                 }
             }
         }
+    }
+
+    /**
+     * 构建生成试卷的 Prompt
+     * 整合 PDF 内容、应用名称和应用描述，使生成的题目更符合应用场景
+     *
+     * @param pdfContent PDF 文本内容
+     * @param appName    应用名称（可为空）
+     * @param appDesc    应用描述（可为空）
+     * @return 完整的 Prompt
+     */
+    private String buildGeneratePrompt(String pdfContent, String appName, String appDesc) {
+        StringBuilder promptBuilder = new StringBuilder();
+
+        // 应用上下文
+        promptBuilder.append("你是一个专业的题目生成助手。请根据以下信息生成一套考试题目。\n\n");
+
+        if (appName != null && !appName.isEmpty()) {
+            promptBuilder.append("【应用名称】\n");
+            promptBuilder.append(appName).append("\n\n");
+        }
+
+        if (appDesc != null && !appDesc.isEmpty()) {
+            promptBuilder.append("【应用描述】\n");
+            promptBuilder.append(appDesc).append("\n\n");
+        }
+
+        // PDF 内容
+        promptBuilder.append("【参考内容】\n");
+        promptBuilder.append(pdfContent).append("\n\n");
+
+        // 生成要求
+        promptBuilder.append("【题目要求】\n");
+        promptBuilder.append("1. 根据参考内容生成 5 道选择题，题目应与参考内容紧密相关\n");
+        promptBuilder.append("2. 每道题包含 2-4 个选项，正确选项 score 为 1，错误选项 score 为 0\n");
+        if (appName != null || appDesc != null) {
+            promptBuilder.append("3. 题目应结合应用场景，让题目更贴合实际使用场景\n");
+        }
+        promptBuilder.append("4. 返回格式为 JSON 数组，不要包含任何其他文字或markdown标记\n\n");
+
+        promptBuilder.append("【返回格式】\n");
+        promptBuilder.append("[\n");
+        promptBuilder.append("  {\n");
+        promptBuilder.append("    \"question\": \"题目描述\",\n");
+        promptBuilder.append("    \"options\": [\n");
+        promptBuilder.append("      {\"option\": \"A. 选项A内容\", \"score\": 1},\n");
+        promptBuilder.append("      {\"option\": \"B. 选项B内容\", \"score\": 0}\n");
+        promptBuilder.append("    ]\n");
+        promptBuilder.append("  }\n");
+        promptBuilder.append("]\n");
+
+        return promptBuilder.toString();
     }
 
     /**

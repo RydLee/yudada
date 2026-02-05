@@ -66,7 +66,7 @@ public class AIConfig {
     public AiExamGenerator aiExamGenerator(ChatLanguageModel qwenChatModel) {
         return AiServices.builder(AiExamGenerator.class)
                 .chatLanguageModel(qwenChatModel)
-                .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
+                .chatMemory(MessageWindowChatMemory.withMaxMessages(20))
                 .build();
     }
 }

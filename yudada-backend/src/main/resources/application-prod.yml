@@ -30,3 +30,10 @@ knife4j:
     enable: true
     username: root
     password: 123456
+rocketmq:
+  # 关键：必须填你的阿里云公网IP（或者内网IP，如果是在服务器上跑）
+  name-server: 182.92.60.12:9876
+  consumer:
+    group: es-sync-group # 消费者组名，对应你代码里的 consumerGroup
+    # 这一行通常用来设置超时时间，防止网络慢导致超时
+    push-consumer-max-timeout-millis: 3000

@@ -1,7 +1,12 @@
+
 # 公共配置文件
 # @author <a href="https://github.com/liyupi">程序员鱼皮</a>
 # @from <a href="https://yupi.icu">编程导航知识星球</a>
+
 spring:
+  h2:
+    console:
+      enabled: false  # 禁用 H2 控制台，防止它报错
   application:
     name: yudada-backend-backend
   # 默认 dev 环境
@@ -19,21 +24,56 @@ spring:
     timeout: 2592000
   # 数据库配置
   # todo 需替换配置
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/yudada
-    username: root
-    password: 123456
+#  datasource:
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#    url: jdbc:mysql://182.92.60.12:3306/yudada
+#    username: root
+#    password: 123456
+    # 分库分表配置
+  shardingsphere:
+    #数据源配置
+    datasource:
+      # 多数据源以逗号隔开即可
+      names: yudada
+      yudada:
+        type: com.zaxxer.hikari.HikariDataSource
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        jdbc-url: jdbc:mysql://182.92.60.12:3306/yudada?serverTimezone=Asia/Shanghai&useSSL=false&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+        username: root
+        password: 123456
+    # 规则配置
+    rules:
+      sharding:
+        # 分片算法配置
+        sharding-algorithms:
+          # 自定义分片规则名
+          answer-table-inline:
+            ## inline 类型是简单的配置文件里面就能写的类型，其他还有自定义类等等
+            type: INLINE
+            props:
+              algorithm-expression: user_answer_$->{appId % 2}
+        tables:
+          user_answer:
+            actual-data-nodes: yudada.user_answer_$->{0..1}
+            # 分表策略
+            table-strategy:
+              standard:
+                sharding-column: appId
+                sharding-algorithm-name: answer-table-inline
+
   # Redis 配置
   # todo 需替换配置，然后取消注释
   redis:
     database: 1
-    host: localhost
+    host: 182.92.60.12
     port: 6379
     timeout: 5000
-#    password: 123456
+    password: 123456
   # Elasticsearch 配置
-
+  elasticsearch:
+    uris: 182.92.60.12:9200  # 没写协议头
+    username: # 如果没设密码留空
+    password:  # 如果没设密码留空
   # 文件上传
   servlet:
     multipart:
@@ -79,4 +119,22 @@ knife4j:
           - com.yupi.yudada.controller
 # AI 配置
 ai:
-  apiKey: 26004786492749ef8c942f9a97a7ea7d.5uFWoWFIKwrNfyju
+  apiKey: 16653b0cb79a4179ad5880ca6b0b25a9.jInPWLRtjQ2Z46aQ #质谱ai
+rocketmq:
+  # 关键：必须填你的阿里云公网IP（或者内网IP，如果是在服务器上跑）
+  name-server: 182.92.60.12:9876
+  consumer:
+    group: es-sync-group-v2 # 消费者组名，对应你代码里的 consumerGroup
+    # 这一行通常用来设置超时时间，防止网络慢导致超时
+    push-consumer-max-timeout-millis: 3000
+# Canal 直连配置
+canal:
+  host: 182.92.60.12  # 你的阿里云公网 IP（如果在服务器跑填内网IP，本地跑填公网IP）
+  port: 11111         # Canal 默认 TCP 端口
+knowledge:
+  qwen:
+    api-key: sk-ad540a6a93cc470e9602d6a9e46fa11a # 建议后续去阿里云重新生成并替换
+  milvus:
+    uri: https://in03-f2505f5568c8176.serverless.ali-cn-hangzhou.cloud.zilliz.com.cn
+    token: b51997bba958e9dea87e9ce9eb5cdd598e6fed12a046c178d0960ebccf99f536bb3fce4647db3e909a4bd42869a8a800fe52e4c7
+    collection-name: yudada_kb_v2025 # 集合名称

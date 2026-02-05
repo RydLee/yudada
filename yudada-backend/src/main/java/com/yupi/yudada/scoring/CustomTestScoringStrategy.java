@@ -8,7 +8,6 @@ import com.yupi.yudada.model.entity.Question;
 import com.yupi.yudada.model.entity.ScoringResult;
 import com.yupi.yudada.model.entity.UserAnswer;
 import com.yupi.yudada.model.vo.QuestionVO;
-import com.yupi.yudada.service.AppService;
 import com.yupi.yudada.service.QuestionService;
 import com.yupi.yudada.service.ScoringResultService;
 

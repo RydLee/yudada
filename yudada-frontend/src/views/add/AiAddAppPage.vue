@@ -67,6 +67,24 @@
                 <icon-robot size="48" />
                 <p>请上传 PDF 或文档文件，AI 将为您生成题目</p>
               </div>
+              <a-form :model="uploadForm" layout="vertical" class="upload-form">
+                <a-form-item field="appName" label="应用名称（选填）">
+                  <a-input
+                    v-model="uploadForm.appName"
+                    placeholder="请输入应用名称，AI 将生成更贴合的题目"
+                    allow-clear
+                  />
+                </a-form-item>
+                <a-form-item field="appDesc" label="应用描述（选填）">
+                  <a-textarea
+                    v-model="uploadForm.appDesc"
+                    placeholder="请输入应用描述，帮助 AI 更好地理解您的需求"
+                    :max-length="200"
+                    show-word-limit
+                    :rows="2"
+                  />
+                </a-form-item>
+              </a-form>
               <a-upload
                 draggable
                 :limit="1"
@@ -86,6 +104,17 @@
               </a-upload>
             </div>
             <template v-else>
+              <!-- 应用信息展示 -->
+              <div v-if="uploadForm.appName || uploadForm.appDesc" class="app-info-card">
+                <div v-if="uploadForm.appName" class="app-info-item">
+                  <span class="app-info-label">应用名称：</span>
+                  <span class="app-info-value">{{ uploadForm.appName }}</span>
+                </div>
+                <div v-if="uploadForm.appDesc" class="app-info-item">
+                  <span class="app-info-label">应用描述：</span>
+                  <span class="app-info-value">{{ uploadForm.appDesc }}</span>
+                </div>
+              </div>
               <div
                 v-for="(msg, index) in messages"
                 :key="index"
@@ -103,11 +132,6 @@
                 <a-spin size="small" />
                 <span>AI 正在思考...</span>
               </div>
-              <a-skeleton v-if="loading && messages.length === 0" :animation="true">
-                <a-skeleton-item style="width: 80%" />
-                <a-skeleton-item style="width: 60%" />
-                <a-skeleton-item style="width: 70%" />
-              </a-skeleton>
             </template>
           </div>
           <div class="chat-input" v-if="hasUploaded">
@@ -131,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { ref, onMounted, nextTick, watch } from "vue";
 import {
   IconFile,
   IconUpload,
@@ -160,8 +184,17 @@ interface ChatMessage {
   content: string;
 }
 
+// SessionStorage Key
+const STORAGE_KEY = "ai_exam_data";
+
 // 当前修改的题目索引
 let currentModifyIndex: number | null = null;
+
+// 上传表单数据
+const uploadForm = ref({
+  appName: "",
+  appDesc: "",
+});
 
 // 响应式数据
 const questions = ref<Question[]>([]);
@@ -174,22 +207,85 @@ const sessionId = ref<string>("");
 const chatContainerRef = ref<HTMLElement>();
 
 /**
- * 页面挂载时创建 Session
+ * 从 sessionStorage 恢复数据
+ */
+const restoreFromStorage = () => {
+  try {
+    const saved = sessionStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const data = JSON.parse(saved);
+      if (data.sessionId && data.questions && data.questions.length > 0) {
+        sessionId.value = data.sessionId;
+        questions.value = data.questions;
+        hasUploaded.value = true;
+        // 恢复聊天消息
+        if (data.messages && data.messages.length > 0) {
+          messages.value = data.messages;
+        }
+        // 恢复表单数据
+        if (data.uploadForm) {
+          uploadForm.value = data.uploadForm;
+        }
+        console.log("已从缓存恢复数据，sessionId:", sessionId.value);
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error("恢复缓存数据失败:", e);
+  }
+  return false;
+};
+
+/**
+ * 保存数据到 sessionStorage
+ */
+const saveToStorage = () => {
+  try {
+    const data = {
+      sessionId: sessionId.value,
+      questions: questions.value,
+      messages: messages.value,
+      uploadForm: uploadForm.value,
+    };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    console.log("数据已保存到缓存");
+  } catch (e) {
+    console.error("保存缓存数据失败:", e);
+  }
+};
+
+/**
+ * 页面挂载时
  */
 onMounted(async () => {
+  // 先尝试从缓存恢复数据
+  if (restoreFromStorage()) {
+    return;
+  }
+
+  // 没有缓存，创建新 Session
   try {
+    console.log("正在创建 Session...");
     const res = await createSessionUsingPost();
-    if (res.data.code === 0 && res.data.data) {
+    console.log("响应数据:", res.data);
+    if (res.data?.code === 0 && res.data?.data) {
       sessionId.value = res.data.data;
       console.log("Session 创建成功:", sessionId.value);
     } else {
-      Message.error("创建会话失败，请刷新重试");
+      Message.error("创建会话失败：" + (res.data?.message || "未知错误"));
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("创建 Session 失败:", error);
-    Message.error("连接服务器失败，请检查网络");
+    Message.error("连接服务器失败，请检查后端是否运行");
   }
 });
+
+// 监听数据变化，自动保存到 sessionStorage
+watch([questions, messages, uploadForm], () => {
+  if (sessionId.value) {
+    saveToStorage();
+  }
+}, { deep: true });
 
 /**
  * 获取题目类型名称
@@ -212,51 +308,108 @@ const getQuestionTypeColor = (options?: QuestionOption[]) => {
  * 处理文件上传
  * @param fileObj Arco UploadChange 事件对象
  */
-const handleFileChange = (fileObj: { file: { originFile?: File }; fileList: unknown[]; event: unknown }) => {
-  const file = fileObj.file?.originFile;
-  if (!file || !sessionId.value) {
+const handleFileChange = (fileObj: any) => {
+  console.log("文件变化事件参数:", fileObj);
+
+  let file: File | undefined;
+
+  if (Array.isArray(fileObj) && fileObj.length > 0) {
+    // fileObj[0].file 直接就是 File 对象
+    file = fileObj[0].file;
+  } else if (fileObj?.file) {
+    file = fileObj.file;
+  }
+
+  if (!file) {
+    Message.warning("无法获取文件，请重试");
+    return;
+  }
+
+  console.log("获取到文件:", file.name, "大小:", file.size);
+
+  if (!sessionId.value) {
     Message.warning("会话未建立，请刷新页面重试");
     return;
   }
 
+  // 立即切换到对话界面
+  hasUploaded.value = true;
+  // 添加用户上传文件的消息
+  messages.value.push({
+    role: "user",
+    content: `上传了文件：<strong>${file.name}</strong>`,
+  });
+  // 添加 AI 等待消息
+  messages.value.push({
+    role: "ai",
+    content: `收到文件，正在分析文档并生成题目，请稍候...`,
+  });
+  nextTick(() => scrollToBottom());
+
   uploading.value = true;
 
   /**
-   * 上传文件
+   * 执行上传
    */
   const doUpload = async () => {
     try {
-      const res = await generateExamUsingPost(file, sessionId.value);
+      console.log("开始上传... appName:", uploadForm.value.appName, "appDesc:", uploadForm.value.appDesc);
+      const res = await generateExamUsingPost(
+        file!,
+        sessionId.value,
+        uploadForm.value.appName || undefined,
+        uploadForm.value.appDesc || undefined
+      );
+      console.log("上传响应:", res.data);
 
       if (res.data.code === 0 && res.data.data) {
-        hasUploaded.value = true;
         questions.value = res.data.data;
 
-        // 添加 AI 欢迎消息
+        // 移除 AI 的等待消息，添加成功消息
+        messages.value.pop();
         messages.value.push({
           role: "ai",
-          content: `已成功上传并分析文件，生成 <strong>${questions.value.length} 道题目</strong>。左侧预览区可以查看生成的题目。您可以：<br/>- 点击题目卡片上的"AI 修改"按钮调整题目<br/>- 在下方输入框中描述修改需求`,
+          content: `已成功上传并分析文件，生成 <strong>${questions.value.length} 道题目</strong>。左侧预览区可以查看生成的题目。您可以点击题目上的"AI 修改"按钮进行调整。`,
         });
 
+        saveToStorage();
         Message.success("题目生成成功！");
         nextTick(() => scrollToBottom());
       } else {
+        // 移除等待消息
+        messages.value.pop();
         const errorCode = res.data.code;
         if (errorCode === 40400) {
-          Message.error("会话已过期，请刷新页面重新上传");
+          messages.value.push({
+            role: "ai",
+            content: `会话已过期，请刷新页面重新上传`,
+          });
           sessionId.value = "";
         } else {
-          Message.error("生成失败：" + (res.data.message || "未知错误"));
+          messages.value.push({
+            role: "ai",
+            content: `生成失败：${res.data.message || "未知错误"}`,
+          });
         }
+        nextTick(() => scrollToBottom());
       }
     } catch (error: any) {
+      // 移除等待消息
+      messages.value.pop();
       console.error("上传失败:", error);
       if (error.response?.data?.code === 40400) {
-        Message.error("会话已过期，请刷新页面重新上传");
+        messages.value.push({
+          role: "ai",
+          content: `会话已过期，请刷新页面重新上传`,
+        });
         sessionId.value = "";
       } else {
-        Message.error("上传失败，请检查网络连接");
+        messages.value.push({
+          role: "ai",
+          content: `上传失败，请检查网络连接`,
+        });
       }
+      nextTick(() => scrollToBottom());
     } finally {
       uploading.value = false;
     }
@@ -559,6 +712,12 @@ const scrollToBottom = () => {
   color: var(--color-text-3) !important;
 }
 
+.upload-form {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 16px;
+}
+
 .message-item {
   display: flex;
   gap: 12px;
@@ -624,5 +783,35 @@ const scrollToBottom = () => {
 .chat-input {
   padding: 16px;
   border-top: 1px solid var(--color-border-2);
+}
+
+.app-info-card {
+  background: linear-gradient(135deg, var(--color-primary-light-2) 0%, var(--color-primary-light-1) 100%);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.app-info-item {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.app-info-item:last-child {
+  margin-bottom: 0;
+}
+
+.app-info-label {
+  color: var(--color-text-2);
+  font-size: 13px;
+  white-space: nowrap;
+  margin-right: 8px;
+}
+
+.app-info-value {
+  color: var(--color-text-1);
+  font-size: 14px;
+  word-break: break-word;
 }
 </style>

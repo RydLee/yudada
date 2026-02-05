@@ -19,15 +19,25 @@ export const createSessionUsingPost = (): AxiosPromise<string> => {
  * 生成试卷
  * @param file PDF 文件
  * @param sessionId 会话 ID
+ * @param appName 应用名称（可选，帮助 AI 生成更贴合的题目）
+ * @param appDesc 应用描述（可选）
  * @returns 题目列表
  */
 export const generateExamUsingPost = (
   file: File,
-  sessionId: string
+  sessionId: string,
+  appName?: string,
+  appDesc?: string
 ): AxiosPromise<API.QuestionContentDTO[]> => {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("sessionId", sessionId);
+  if (appName) {
+    formData.append("appName", appName);
+  }
+  if (appDesc) {
+    formData.append("appDesc", appDesc);
+  }
   return myAxios({
     url: "/api/exam/generate",
     method: "post",

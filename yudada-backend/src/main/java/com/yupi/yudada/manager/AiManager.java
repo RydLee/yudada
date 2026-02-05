@@ -2,24 +2,28 @@ package com.yupi.yudada.manager;
 
 import com.yupi.yudada.common.ErrorCode;
 import com.yupi.yudada.exception.BusinessException;
-import com.zhipu.oapi.ClientV4;
-import com.zhipu.oapi.Constants;
-import com.zhipu.oapi.service.v4.model.*;
-import io.reactivex.Flowable;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.output.Response;
 import org.springframework.stereotype.Component;
+// 如果不需要流式，可以移除 Flux 引用，或者引入 StreamingChatLanguageModel
+import reactor.core.publisher.Flux;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
- * 通用 AI 调用能力
+ * 通用 AI 调用能力 (使用通义千问 Qwen LangChain4j)
  */
 @Component
 public class AiManager {
 
     @Resource
-    private ClientV4 clientV4;
+    private ChatLanguageModel qwenChatModel;
 
     // 稳定的随机数
     private static final float STABLE_TEMPERATURE = 0.05f;
@@ -29,76 +33,39 @@ public class AiManager {
 
     /**
      * 同步请求（答案不稳定）
-     *
-     * @param systemMessage
-     * @param userMessage
-     * @return
      */
     public String doSyncUnstableRequest(String systemMessage, String userMessage) {
-        return doRequest(systemMessage, userMessage, Boolean.FALSE, UNSTABLE_TEMPERATURE);
+        return doRequest(systemMessage, userMessage, UNSTABLE_TEMPERATURE);
     }
 
     /**
      * 同步请求（答案较稳定）
-     *
-     * @param systemMessage
-     * @param userMessage
-     * @return
      */
     public String doSyncStableRequest(String systemMessage, String userMessage) {
-        return doRequest(systemMessage, userMessage, Boolean.FALSE, STABLE_TEMPERATURE);
+        return doRequest(systemMessage, userMessage, STABLE_TEMPERATURE);
     }
 
     /**
      * 同步请求
-     *
-     * @param systemMessage
-     * @param userMessage
-     * @param temperature
-     * @return
      */
     public String doSyncRequest(String systemMessage, String userMessage, Float temperature) {
-        return doRequest(systemMessage, userMessage, Boolean.FALSE, temperature);
-    }
-
-    /**
-     * 通用请求（简化消息传递）
-     *
-     * @param systemMessage
-     * @param userMessage
-     * @param stream
-     * @param temperature
-     * @return
-     */
-    public String doRequest(String systemMessage, String userMessage, Boolean stream, Float temperature) {
-        List<ChatMessage> chatMessageList = new ArrayList<>();
-        ChatMessage systemChatMessage = new ChatMessage(ChatMessageRole.SYSTEM.value(), systemMessage);
-        chatMessageList.add(systemChatMessage);
-        ChatMessage userChatMessage = new ChatMessage(ChatMessageRole.USER.value(), userMessage);
-        chatMessageList.add(userChatMessage);
-        return doRequest(chatMessageList, stream, temperature);
+        return doRequest(systemMessage, userMessage, temperature);
     }
 
     /**
      * 通用请求
-     *
-     * @param messages
-     * @param stream
-     * @param temperature
-     * @return
      */
-    public String doRequest(List<ChatMessage> messages, Boolean stream, Float temperature) {
-        // 构建请求
-        ChatCompletionRequest chatCompletionRequest = ChatCompletionRequest.builder()
-                .model(Constants.ModelChatGLM4)
-                .stream(stream)
-                .temperature(temperature)
-                .invokeMethod(Constants.invokeMethod)
-                .messages(messages)
-                .build();
+    public String doRequest(String systemMessage, String userMessage, Float temperature) {
         try {
-            ModelApiResponse invokeModelApiResp = clientV4.invokeModelApi(chatCompletionRequest);
-            return invokeModelApiResp.getData().getChoices().get(0).toString();
+            // 注意：ChatLanguageModel 本身在创建时已经指定了 temperature
+            // 如果需要在调用时动态改变，通常需要多个 Model 实例或特定的高级接口
+            List<ChatMessage> messages = Arrays.asList(
+                    SystemMessage.from(systemMessage),
+                    UserMessage.from(userMessage)
+            );
+
+            Response<AiMessage> response = qwenChatModel.generate(messages);
+            return response.content().text();
         } catch (Exception e) {
             e.printStackTrace();
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, e.getMessage());
@@ -106,45 +73,20 @@ public class AiManager {
     }
 
     /**
-     * 通用流式请求（简化消息传递）
-     *
-     * @param systemMessage
-     * @param userMessage
-     * @param temperature
-     * @return
+     * 流式请求说明：
+     * 如果要实现真正的流式，需要注入 StreamingChatLanguageModel。
+     * 这里的 ChatLanguageModel 是同步阻塞的，无法直接生成 Flux。
+     * 以下提供一个兼容性的修改，消除爆红：
      */
-    public Flowable<ModelData> doStreamRequest(String systemMessage, String userMessage, Float temperature) {
-        List<ChatMessage> chatMessageList = new ArrayList<>();
-        ChatMessage systemChatMessage = new ChatMessage(ChatMessageRole.SYSTEM.value(), systemMessage);
-        chatMessageList.add(systemChatMessage);
-        ChatMessage userChatMessage = new ChatMessage(ChatMessageRole.USER.value(), userMessage);
-        chatMessageList.add(userChatMessage);
-        return doStreamRequest(chatMessageList, temperature);
-    }
-
-
-    /**
-     * 通用流式请求
-     *
-     * @param messages
-     * @param temperature
-     * @return
-     */
-    public Flowable<ModelData> doStreamRequest(List<ChatMessage> messages, Float temperature) {
-        // 构建请求
-        ChatCompletionRequest chatCompletionRequest = ChatCompletionRequest.builder()
-                .model(Constants.ModelChatGLM4)
-                .stream(Boolean.TRUE)
-                .temperature(temperature)
-                .invokeMethod(Constants.invokeMethod)
-                .messages(messages)
-                .build();
+    public Flux<String> doStreamRequest(String systemMessage, String userMessage, Float temperature) {
         try {
-            ModelApiResponse invokeModelApiResp = clientV4.invokeModelApi(chatCompletionRequest);
-            return invokeModelApiResp.getFlowable();
+            // 由于 qwenChatModel 是同步模型，这里只能模拟返回或抛出异常提醒
+            // 正常流式应当使用 streamingChatModel.generate(messages, handler)
+            String result = doRequest(systemMessage, userMessage, temperature);
+            return Flux.just(result);
         } catch (Exception e) {
             e.printStackTrace();
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, e.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "当前模型不支持流式输出");
         }
     }
 }

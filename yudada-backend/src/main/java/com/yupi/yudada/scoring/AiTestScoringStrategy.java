@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /*
-   Ai 测评类评分策略
+   Ai 测评类评分策略 (使用通义千问)
  */
 @ScoringStrategyConfig(appType = 1, scoringStrategy = 1)
 public class AiTestScoringStrategy implements ScoringStrategy {
@@ -64,7 +64,7 @@ public class AiTestScoringStrategy implements ScoringStrategy {
             "{\"resultName\": \"评价名称\", \"resultDesc\": \"评价描述\"}\n" +
             "```\n" +
             "3. 返回格式必须为 JSON 对象 \n" +
-            "4. 返回的结果必须为可以被hutool解析的字符串，不能包含‘```json’、‘\\n’ ";
+            "4. 返回的结果必须为可以被hutool解析的字符串，不能包含'```json'、'\\n' ";
 
     @Override
     public UserAnswer doScore(List<String> choices, App app) throws Exception {
@@ -103,29 +103,24 @@ public class AiTestScoringStrategy implements ScoringStrategy {
             // 2. 调用 AI 获取结果
             // 封装prompt
             String userMessage = getAiTestScoringUserMessage(app, questionContent, choices);
-            // AI 生成
+            // AI 生成 (通义千问直接返回内容，不需要解析)
             String json = aiManager.doSyncStableRequest(AI_TEST_SCORING_SYSTEM_MESSAGE, userMessage);
 
-            System.out.println("json：" + json);
-            // 第一步：解析外层 JSON
-            JSONObject wrapper = JSONUtil.parseObj(json);
-            // 第二步：提取 message.content 字段
-            String contentJsonStr = wrapper.getJSONObject("message").getStr("content");
-            int start = contentJsonStr.indexOf("{");
-            int end = contentJsonStr.lastIndexOf("}");
-            contentJsonStr = contentJsonStr.substring(start, end + 1);
-            // 第三步：去掉前后的换行符等空白
-            contentJsonStr = contentJsonStr.trim();
-            // 第四步：将 content 解析为 JSON
+            System.out.println("AI评分响应：" + json);
+
+            // 解析 AI 返回的 JSON
+            int start = json.indexOf("{");
+            int end = json.lastIndexOf("}");
+            String contentJsonStr = json.substring(start, end + 1).trim();
             JSONObject realJson = JSONUtil.parseObj(contentJsonStr);
-//        System.out.println("realJson：" + realJson);
-//        // 输出验证
-//        System.out.println("resultName: " + realJson.getStr("resultName"));
-//        System.out.println("resultDesc: " + realJson.getStr("resultDesc"));
+
             // 缓存结果
             answerCacheMap.put(cacheKey, JSONUtil.toJsonStr(realJson));
+
             // 3. 构造返回值，填充答案对象的属性
-            UserAnswer userAnswer = JSONUtil.toBean(realJson, UserAnswer.class);
+            UserAnswer userAnswer = new UserAnswer();
+            userAnswer.setResultName(realJson.getStr("resultName"));
+            userAnswer.setResultDesc(realJson.getStr("resultDesc"));
 
             userAnswer.setAppId(appId);
             userAnswer.setAppType(app.getAppType());

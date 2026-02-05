@@ -22,20 +22,17 @@ import com.yupi.yudada.model.vo.QuestionVO;
 import com.yupi.yudada.service.AppService;
 import com.yupi.yudada.service.QuestionService;
 import com.yupi.yudada.service.UserService;
-import com.zhipu.oapi.service.v4.model.ModelData;
-import io.reactivex.Flowable;
-import io.reactivex.schedulers.Schedulers;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringEscapeUtils;
+import org.apache.commons.lang.StringEscapeUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 题目接口
@@ -342,47 +339,43 @@ public class QuestionController {
         // 创建 SSE
         SseEmitter sseEmitter = new SseEmitter(0L);
 
-        // AI 生成, SSE 流式返回
-        Flowable<ModelData> modelDataFlowable = aiManager.doStreamRequest(GENERATE_QUESTION_SYSTEM_MESSAGE, userMessage, null);
-        // 左括号计数器
-        AtomicInteger counter = new AtomicInteger(0);
-        // 拼接完整题目
-        StringBuilder stringBuilder = new StringBuilder();
-        modelDataFlowable
-                .observeOn(Schedulers.io())
-                .map(modelData -> modelData.getChoices().get(0).getDelta().getContent())
-                .map(message -> message.replaceAll("\\s", ""))
-                .filter(StrUtil::isNotBlank)
-                .flatMap(message -> {
-                    List<Character> characterList = new ArrayList<>();
-                    for (char c : message.toCharArray()) {
-                        characterList.add(c);
-                    }
-                    return Flowable.fromIterable(characterList);
-                })
-                .doOnNext(c -> {
-                    // 如果是左括号， atomicInteger + 1
-                    if (c == '{') {
-                        counter.addAndGet(1);
-                    }
-                    if (counter.get() > 0) {
-                        stringBuilder.append(c);
-                    }
-                    if (c == '}') {
-                        counter.addAndGet(-1);
-                        if (counter.get() == 0) {
-                            // 可以拼接题目,并且通过sse发送给前端
-                            sseEmitter.send(JSONUtil.toJsonStr(stringBuilder.toString()));
-                            // 重置，拼接下一道
-                            stringBuilder.setLength(0);
-                        }
-                    }
-                })
-                .doOnError(e -> log.error("sse error", e))
-                .doOnComplete(sseEmitter::complete)
-                .subscribe();
+        // AI 生成, SSE 流式返回 - 使用同步调用
+        try {
+            String result = aiManager.doSyncStableRequest(GENERATE_QUESTION_SYSTEM_MESSAGE, userMessage);
+
+            // 解析 JSON 数组并逐个发送
+            String json = extractJsonFromResponse(result);
+            JSONArray jsonArray = JSONUtil.parseArray(json);
+            List<QuestionContentDTO> questionList = JSONUtil.toList(jsonArray, QuestionContentDTO.class);
+
+            // 逐个发送题目
+            // 逐个发送题目，指定事件名称为 "message"
+            for (QuestionContentDTO question : questionList) {
+                // 使用 event() 构建器来正确设置事件名称和数据
+                SseEmitter.SseEventBuilder eventBuilder = SseEmitter.event()
+                        .name("message") // 设置事件名称
+                        .data(JSONUtil.toJsonStr(question)); // 设置数据
+                sseEmitter.send(eventBuilder);
+            }
+        } catch (Exception e) {
+            log.error("AI生成题目失败", e);
+        } finally {
+            sseEmitter.complete();
+        }
 
         return sseEmitter;
+    }
+
+    /**
+     * 从AI响应中提取JSON
+     */
+    private String extractJsonFromResponse(String response) {
+        int start = response.indexOf("[");
+        int end = response.lastIndexOf("]");
+        if (start >= 0 && end >= start) {
+            return response.substring(start, end + 1);
+        }
+        return response;
     }
     // endregion
 }

@@ -93,8 +93,8 @@ public class UserAnswerController {
             userAnswerWithResult.setAppId(null);
             userAnswerService.updateById(userAnswerWithResult);
         } catch (Exception e) {
-            e.printStackTrace();
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "评分错误");
+            log.error("评分失败", e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "评分错误: " + e.getMessage());
         }
         return ResultUtils.success(newUserAnswerId);
     }

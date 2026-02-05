@@ -60,6 +60,8 @@ spring:
               standard:
                 sharding-column: appId
                 sharding-algorithm-name: answer-table-inline
+        # 默认数据源（未配置分片规则的表使用默认数据源）
+        default-data-source-name: yudada
 
   # Redis 配置
   # todo 需替换配置，然后取消注释

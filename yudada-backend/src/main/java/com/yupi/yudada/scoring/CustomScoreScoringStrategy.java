@@ -2,6 +2,8 @@ package com.yupi.yudada.scoring;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.yupi.yudada.common.ErrorCode;
+import com.yupi.yudada.exception.BusinessException;
 import com.yupi.yudada.model.dto.question.QuestionContentDTO;
 import com.yupi.yudada.model.entity.App;
 import com.yupi.yudada.model.entity.Question;
@@ -27,11 +29,21 @@ public class CustomScoreScoringStrategy implements ScoringStrategy {
         Question question = questionService.getOne(
                 Wrappers.lambdaQuery(Question.class).eq(Question::getAppId, app.getId())
         );
+        // 校验题目是否存在
+        if (question == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该应用下没有题目，请先创建题目");
+        }
+
         List<ScoringResult> scoringResultList = scoringResultService.list(
                 Wrappers.lambdaQuery(ScoringResult.class)
                         .eq(ScoringResult::getAppId, app.getId())
                         .orderByDesc(ScoringResult::getResultScoreRange)
         );
+        // 校验评分结果是否存在
+        if (scoringResultList == null || scoringResultList.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该应用下没有评分结果，请先添加评分结果");
+        }
+
         //2. 根据用户选择的答案和题目结果信息计算得分
         int totalScore = 0;
         QuestionVO questionVO = QuestionVO.objToVo(question);
